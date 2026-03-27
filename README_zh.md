@@ -33,7 +33,7 @@
 请使用 pip 安装以下必备的库：
 
 ```bash
-pip install bibtexparser requests duckduckgo-search
+pip install bibtexparser requests ddgs
 ```
 * `bibtexparser`: 用于精准解析和格式化提取 `.bib` 文件。
 * `requests`: 用于调用 Crossref、arXiv API 以及请求本地的 vLLM 接口。
@@ -60,7 +60,7 @@ python -m vllm.entrypoints.openai.api_server \
 2. 在终端运行脚本，并传入你需要核查的 BibTeX 文件路径：
 
 ```bash
-python check_citation.py my_paper.bib
+python check_citation.py demo.bib
 ```
 *（如果不传入参数，脚本默认会查找当前目录下的 `main.bib`）。*
 
