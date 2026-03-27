@@ -1,4 +1,5 @@
 # BibTeX Citation Audit & Anti-Hallucination Tool
+English | [中文](README_zh.md)
 
 A semi-automated BibTeX citation verification tool designed for academic researchers. By combining "multi-tier precise retrieval" with "Local Large Language Model (LLM) semantic evaluation," this tool automatically filters out dead links, typos, and AI-generated "hallucinated" citations in your `.bib` files, generating a highly intuitive HTML audit report.
 
