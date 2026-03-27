@@ -33,7 +33,7 @@ The script requires standard Python retrieval libraries and a locally running LL
 Install the required packages using pip:
 
 ```bash
-pip install bibtexparser requests duckduckgo-search
+pip install bibtexparser requests ddgs
 ```
 * `bibtexparser`: For parsing and reading `.bib` files.
 * `requests`: For handling API calls to Crossref, arXiv, and the local vLLM endpoint.
@@ -60,7 +60,7 @@ python -m vllm.entrypoints.openai.api_server \
 2. Run the script from the terminal, passing your BibTeX file as an argument:
 
 ```bash
-python check_citation.py my_paper.bib
+python check_citation.py demo.bib
 ```
 *(If no argument is provided, the script will default to looking for `main.bib` in the current directory).*
 
