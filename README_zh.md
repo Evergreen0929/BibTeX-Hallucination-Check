@@ -60,7 +60,7 @@ python -m vllm.entrypoints.openai.api_server \
 2. 在终端运行脚本，并传入你需要核查的 BibTeX 文件路径：
 
 ```bash
-python check_citation.py demo.bib
+python check_citation_v0_dev.py demo.bib
 ```
 *（如果不传入参数，脚本默认会查找当前目录下的 `main.bib`）。*
 
