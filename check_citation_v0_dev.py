@@ -14,7 +14,7 @@ from ddgs import DDGS
 LOCAL_LLM_URL = "http://localhost:8001/v1/chat/completions" 
 MODEL_NAME = "Qwen/Qwen3-235B-A22B"
 # 强烈建议填入真实邮箱，进入 Crossref Polite Pool，提速防封
-CROSSREF_EMAIL = "jdzhang@tamu.edu" 
+CROSSREF_EMAIL = "your@email.com" 
 LLM_AVAILABLE = False
 
 OFFICIAL_DOMAINS = [
