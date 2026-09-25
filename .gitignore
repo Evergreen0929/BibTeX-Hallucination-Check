@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+audit_results_*/
+citation_audit_report.html
+citation_audit_report.md
+strict_results.json

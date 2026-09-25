@@ -1,82 +1,102 @@
-# BibTeX Citation Audit Tool (文献自动核查与防幻觉工具)
+# BibTeX Citation Audit Tool（文献自动核查与防幻觉工具）
+
 [English](README.md) | 中文
 
-这是一个专为学术研究人员设计的半自动化 BibTeX 引用核查工具。它通过“多级精准检索”与“本地大语言模型（LLM）语义判别”相结合，自动排查 `.bib` 文件中的失效、错误或 AI 编造的“幻觉”文献，并生成直观的可交互 HTML 审查报告。
+这是一个只读、基于可核验证据的 BibTeX 审查工具，用于发现虚构文献和书目信息错误。工具会从 Crossref、OpenAlex、arXiv、出版商页面及官方学术网站检索多个候选记录，要求相关字段能够由同一条一致的来源记录支持，并仅在确定性规则无法消除歧义时使用 Codex 进行最终语义判断。
 
-## ⚙️ 工作原理 (The Funnel Mechanism)
+## 核验内容
 
-本工具采用“漏斗式”三级过滤机制来验证每一篇文献的真实性：
+工具逐项检查每条文献的：
 
-1. **第一级：Crossref 官方免检 (Gold Standard)**
-   工具首先将 BibTeX 标题提交给 Crossref 官方 API（通过礼貌池 Polite Pool 加速请求）。如果获得精确匹配，该文献将被标记为 `Verified`，直接放行，不再消耗任何后续算力。
-2. **第二级：arXiv 深度检索 + LLM 语义核查**
-   如果未命中，工具会提取标题的核心实词，向 arXiv API 请求最多 10 条候选结果。每拿到一条结果，都会将其标题、作者和摘要连同原始 BibTeX 一起发送给本地部署的 LLM。只要 LLM 判定属于同一篇文献，即立刻跳出检索循环，将其归入 `Double Check` 列表。
-3. **第三级：DuckDuckGo 网页兜底 (官方白名单) + LLM 语义核查**
-   如果 arXiv 中未找到，工具将在全网检索相关网页。**关键机制：系统内置了严格的学术域名白名单**（如 `ieee.org`, `thecvf.com`, `neurips.cc`），自动过滤掉 GitHub、知乎或个人博客等非权威来源。只有来自官方源的片段才会交由 LLM 进行语义匹配。
-4. **彻底未发现 (Missing)**
-   如果历经上述所有步骤深度检索均未找到匹配项，该文献将被判定为极高风险的“拼写错误”或“AI 幻觉文献”，归入 `Missing` 警告区。
+- 完整规范化标题，包括预印本与正式发表版本的标题变化；
+- 完整作者名单和作者顺序；
+- `and others` 之前是否为准确、有序的作者前缀；
+- 年份和论文类型；
+- 最终会议或期刊，以及是否仍仅为 arXiv 预印本；
+- DOI、arXiv ID 和 URL 是否指向同一篇论文；
+- 官方页面、出版商 metadata、Crossref、OpenAlex 与 arXiv 是否相互一致。
 
-### 🛡️ 核心特性：为何能最大程度避免 LLM 幻觉？
+输入的 `.bib` 文件始终以只读方式打开，工具不会改写原文件。
 
-许多学术工具在利用 LLM 处理文献时容易产生“幻觉”（即模型凭空捏造不存在的论文链接或卷号）。本工具通过以下设计从根本上规避了这一问题：
+## 检索与判定流程
 
-* **角色反转（LLM 作为裁判而非搜索源）：** 工具绝不询问 LLM “这篇论文存在吗？”或“请给我这篇论文的链接”。LLM 仅仅扮演“阅卷老师”的角色，它唯一的任务是比对 A（BibTeX 信息）和 B（真实的搜索引擎返回片段），判断二者是否指向同一实体。
-* **信息隔离（Context-Only 推理）：** 所有的 URL、摘要和元数据均来自于真实的外部 API。LLM 被限制在严格的系统提示词下（且 `temperature=0.0`），只输出 JSON 格式的判定结果（`is_match` 和 `reason`），彻底切断了模型动用自身预训练权重去“脑补”文献的可能。
-* **物理证据绑定：** 报告中展示的每一个候选链接，都是爬虫真真切切从官方学术域名抓取到的有效网址，所见即所得。
+1. **结构化检索：** 分别比较最多五条 Crossref 和 OpenAlex 候选，不再直接采用第一条搜索结果。
+2. **arXiv 核验：** 直接解析已有 arXiv ID，同时进行多候选标题检索；当前 arXiv 记录会与旧版本和 BibTeX 信息共同核对。
+3. **第一方来源核验：** 解析条目中的 DOI 或 URL、出版商 metadata、官方 proceedings 索引和学术白名单网站。
+4. **严格字段比较：** 规范化 LaTeX 与 Unicode，比较完整标题和有序作者列表，并要求相关字段由同一条一致候选记录支持，禁止从互不兼容的候选中拼接字段后放行。
+5. **Codex 兜底判断：** 当确定性证据仍有歧义时，Codex 只比较已检索到的证据与 BibTeX，并以 JSON Schema 约束输出。Codex 不负责凭空搜索或生成文献。
 
-## 🛠️ 环境配置
+旧实现中的宽松规则已被移除：标题前若干字符相同不能直接通过，Crossref 第一条结果不能直接采用，查询时使用第一作者也不能代替完整作者校验。
 
-本脚本依赖 Python 基础检索库以及本地运行的大模型 API 服务。
+## 三类结果
 
-### 1. Python 依赖包配置
+- **Verified：** 一条一致的权威记录支持所有必要书目信息。
+- **Double Check：** 找到了真实或高度匹配的论文，但部分字段冲突、不完整或对应不同版本。这**不等于文献错误**。例如，正确的 arXiv 引用可能仅因为后来出现正式会议版本而进入该类。
+- **Hallucination：** 在结构化数据库和官方学术网站中均未找到可信匹配。这是高风险提示；当检索服务异常时，仍不能替代最终人工判断。
 
-请使用 pip 安装以下必备的库：
+来源冲突时，建议依次以最终论文 PDF 和作者更正记录、会议或期刊官方页面、出版商/DOI metadata、当前 arXiv 页面、书目索引为准；Google Scholar 等聚合平台仅作为辅助线索。
+
+## 环境要求
+
+安装 Python 依赖：
 
 ```bash
 pip install bibtexparser requests ddgs
 ```
-* `bibtexparser`: 用于精准解析和格式化提取 `.bib` 文件。
-* `requests`: 用于调用 Crossref、arXiv API 以及请求本地的 vLLM 接口。
-* `duckduckgo-search` (`ddgs`): 用于免费且无限制的 Web 兜底检索。
 
-### 2. 本地 LLM 服务配置 (推荐 vLLM)
-
-本工具依赖兼容 OpenAI API 格式的本地大模型服务进行语义判定。代码默认指向 `Qwen/Qwen3-235B-A22B`。
-
-如果你拥有充足的 GPU 资源并使用 `vLLM` 部署模型，请在新终端运行以下命令启动后端（请根据显卡数量调整 `--tensor-parallel-size`）：
+安装并登录 Codex CLI，确保 `codex` 位于 `PATH`。如果使用非标准安装位置，可设置：
 
 ```bash
-python -m vllm.entrypoints.openai.api_server \
-    --model Qwen/Qwen3-235B-A22B \
-    --tensor-parallel-size 8 \
-    --port 8001
+export CODEX_BIN=/path/to/codex
 ```
 
-*提示：如果你使用的是不同的推理框架（如 Ollama）或其他模型权重，请在脚本开头的 `LOCAL_LLM_URL` 和 `MODEL_NAME` 变量中修改对应参数。如果脚本未检测到可用的大模型，将自动降级为“仅保存搜索结果”的人工核查模式。*
-
-## 🚀 使用方法
-
-1. 确保你的本地 LLM 服务（端口 8001）已启动。
-2. 在终端运行脚本，并传入你需要核查的 BibTeX 文件路径：
+建议为 Crossref polite pool 配置邮箱：
 
 ```bash
-python check_citation_v0_dev.py demo.bib
+export CROSSREF_EMAIL=you@example.com
 ```
-*（如果不传入参数，脚本默认会查找当前目录下的 `main.bib`）。*
 
-*🔥 **鲁棒性提示：** 在处理几百篇文献时，如果您随时按下 `Ctrl+C` 中断程序，脚本会捕获中断信号，并**立即为您生成并保存当前已核查进度的 HTML 报告**，绝不丢失任何检索数据。*
+如果 Codex 不可用，确定性检索和字段比较仍会继续，但有歧义的条目不会被提升为 `Verified`。
 
-## 📄 输出结果 (报告结构)
+## 使用方法
 
-运行结束后，当前目录会生成 `citation_audit_report.html`。双击在浏览器中打开，结果分为三类：
+直接运行：
 
-* ✅ **Verified (无需检查)**: 已通过 Crossref 官方 API 绝对确认为存在的真实文献。
-* ⚠️ **Double Check (建议人工确认)**: 在 arXiv 或官方白名单网页中检索到，且本地 LLM 判定“语义匹配”。报告会直观展示候选 URL、LLM 的判定理由以及原始 BibTeX 代码，方便快速定位和修改。
-* ❌ **Missing (高度可疑/幻觉)**: 经过全库检索均查无此文。请务必核对原始论文标题是否写错，或是否属于大模型生成的虚假引用。
+```bash
+python check_citation_v0_dev.py references.bib
+```
 
-## ⚠️ 免责声明 (Disclaimer)
+如果不提供路径，脚本默认读取当前目录中的 `main.bib`。
 
-**本工具是一款半自动化的学术辅助脚本，无法完全替代研究人员的严谨审查。**
-1. **依赖限制：** 工具的自动确认（Verified）完全依赖于第三方数据库（Crossref / arXiv）的元数据准确性及网络连通性。
-2. **需要人工最终把关：** 所有由 LLM 判定为“匹配”的结果（Double Check）仅代表语义上的高度相似性。**您必须亲自点击报告中的链接，核实卷号、年份及会议名称的准确性。**
-3. **检索波动：** 网页搜索（Web Search）可能会受到 IP 频率限制或网络波动的影响，导致偶发性的漏搜。
+如需通过运行前后哈希证明输入文件未改变，可使用：
+
+```bash
+./run_upstream_codex_audit.sh references.bib audit_results
+```
+
+可通过 `PYTHON=/path/to/python` 指定解释器。
+
+## 输出报告
+
+每次运行生成：
+
+- `citation_audit_report.html`：可交互证据报告；
+- `citation_audit_report.md`：便于人工审阅的 Markdown 报告；
+- `strict_results.json`：可供后续程序处理的完整结构化结果。
+
+每条记录均包含原始 BibTeX、判定原因、检索来源、URL、规范化 metadata、逐字段结果及跨来源差异提示。
+
+## 测试
+
+```bash
+python -m unittest -v test_strict_matching.py
+```
+
+回归测试覆盖 LaTeX 规范化、复合姓氏、姓名缩写、完整作者顺序、`and others`、venue 别名、arXiv 到正式发表版本变化、来源冲突，以及“所有字段必须由同一条一致记录支持”等关键行为。
+
+## 局限性
+
+- 第三方数据库本身可能存在错误，最终应以论文和出版方的正式记录为准。
+- 预印本与正式发表版本可能存在合理差异，因此 `Double Check` 通常意味着需要选择引用版本，而不是自动替换。
+- 网络故障或限流可能降低检索覆盖率。
+- 投稿前仍应由作者对所有结果进行最终确认。

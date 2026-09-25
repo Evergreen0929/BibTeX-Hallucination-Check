@@ -1,82 +1,102 @@
 # BibTeX Citation Audit & Anti-Hallucination Tool
+
 English | [中文](README_zh.md)
 
-A semi-automated BibTeX citation verification tool designed for academic researchers. By combining "multi-tier precise retrieval" with "Local Large Language Model (LLM) semantic evaluation," this tool automatically filters out dead links, typos, and AI-generated "hallucinated" citations in your `.bib` files, generating a highly intuitive HTML audit report.
+A read-only, evidence-backed BibTeX auditor for detecting fabricated citations and metadata errors. It retrieves multiple candidate records from Crossref, OpenAlex, arXiv, publisher pages, and official academic websites, verifies bibliographic fields against a coherent source record, and uses Codex only as a final semantic judge for ambiguous matches.
 
-## ⚙️ How It Works (The Funnel Mechanism)
+## What Is Verified
 
-This tool employs a three-tier funnel filtering system to rigorously verify the authenticity of each citation:
+Each entry is checked field by field:
 
-1. **Tier 1: Crossref Direct Verification (Gold Standard)**
-   The tool first queries the official Crossref API with the BibTeX title. It uses the Crossref "Polite Pool" (via email registration) for faster and more stable responses. If an exact match is found, the citation is marked as `Verified` and bypasses all subsequent computation.
-2. **Tier 2: arXiv Deep Search + LLM Semantic Audit**
-   If not found, the tool extracts core keywords from the title and queries the arXiv API for up to 10 candidates. Each candidate's title, author, and summary are sent to the locally deployed LLM alongside the original BibTeX. If the LLM determines a semantic match, the search loop breaks immediately, and the paper is flagged for `Double Check`.
-3. **Tier 3: Web Fallback (Strict Whitelist) + LLM Semantic Audit**
-   If the paper isn't on arXiv, the tool uses DuckDuckGo to scrape web search results. **Crucially, it strictly filters results using an academic whitelist** (e.g., `ieee.org`, `thecvf.com`, `neurips.cc`). Non-official sources like GitHub or personal blogs are automatically discarded. Valid snippets are then evaluated by the LLM.
-4. **Missing (Dead End / Hallucination Risk)**
-   If a citation survives all deep searching across databases without a match, it is flagged as a high-risk typo or "AI hallucination" and pushed to the red `Missing` alert zone.
+- complete normalized title, including preprint-to-publication title changes;
+- complete author list and order;
+- whether `and others` follows an exact ordered author prefix;
+- publication year and work type;
+- final conference or journal venue versus arXiv-only status;
+- DOI, arXiv ID, and URL identity;
+- consistency among official pages, publisher metadata, Crossref, OpenAlex, and arXiv.
 
-### 🛡️ Core Feature: How It Maximizes the Prevention of LLM Hallucinations
+The input `.bib` file is opened read-only and is never rewritten.
 
-Many academic tools hallucinate (inventing non-existent paper links or volume numbers) when using LLMs for citations. This tool fundamentally eliminates this issue through its architecture:
+## Retrieval and Decision Pipeline
 
-* **Role Reversal (LLM as a Judge, Not a Search Engine):** The tool NEVER asks the LLM "Does this paper exist?" or "Give me the URL for this paper." The LLM acts strictly as a "referee." Its only job is to compare Entity A (the BibTeX info) with Entity B (the raw text fetched by the crawler) and determine if they refer to the same paper.
-* **Information Isolation (Context-Only Prompting):** All URLs, summaries, and metadata come from authentic external APIs. The LLM is forced via strict prompting (with `temperature=0.0`) to output only a structured JSON (`is_match` and `reason`). This cuts off the model's ability to "hallucinate" facts from its pre-trained weights.
-* **Physical Evidence Binding:** Every candidate URL presented in the report is a valid, clickable link genuinely retrieved by the search engine from an official academic domain.
+1. **Structured retrieval:** Query up to five Crossref and OpenAlex candidates instead of trusting the first search result.
+2. **arXiv verification:** Resolve a claimed arXiv ID directly and also search multiple title candidates. The current arXiv record is compared with older versions and with the BibTeX entry.
+3. **Primary-source verification:** Parse a claimed DOI or URL, publisher metadata, official proceedings indexes, and whitelisted academic domains.
+4. **Strict field comparison:** Normalize LaTeX and Unicode, compare full titles and ordered authors, and require one coherent candidate to support the relevant fields. Fields cannot be assembled from incompatible records.
+5. **Codex fallback:** When deterministic evidence remains ambiguous, Codex compares only the retrieved evidence with the BibTeX entry and returns schema-constrained JSON. It does not invent a citation or serve as the primary search engine.
 
-## 🛠️ Environment Configuration
+The previous shortcuts are intentionally removed: a shared title prefix is not sufficient, the first Crossref hit is not accepted automatically, and querying by the first author does not replace full author verification.
 
-The script requires standard Python retrieval libraries and a locally running LLM API service.
+## Result Classes
 
-### 1. Python Dependencies
+- **Verified:** A coherent authoritative record supports all required metadata.
+- **Double Check:** A real or strongly matching work was found, but one or more fields conflict, remain incomplete, or describe a different version. This does **not** automatically mean the citation is wrong. For example, a valid arXiv citation may be flagged because a final proceedings version now exists.
+- **Hallucination:** No credible matching work was recovered after structured and official-web searches. This is a high-risk signal, not a substitute for final human review when retrieval services were unavailable.
 
-Install the required packages using pip:
+When sources disagree, prefer the final paper PDF and correction record, then the official proceedings or publisher page, DOI metadata, current arXiv metadata, bibliographic indexes, and finally search aggregators such as Google Scholar.
+
+## Requirements
+
+Python dependencies:
 
 ```bash
 pip install bibtexparser requests ddgs
 ```
-* `bibtexparser`: For parsing and reading `.bib` files.
-* `requests`: For handling API calls to Crossref, arXiv, and the local vLLM endpoint.
-* `duckduckgo-search` (`ddgs`): For performing free, unrestricted web fallback searches.
 
-### 2. Local LLM Setup (Recommended: vLLM)
-
-This tool relies on an OpenAI API-compatible local LLM server for semantic matching. The default configuration points to `Qwen/Qwen3-235B-A22B`.
-
-If you have sufficient GPU resources and use `vLLM`, launch the server in a separate terminal (adjust `--tensor-parallel-size` according to your hardware):
+Install and authenticate the Codex CLI, then ensure `codex` is on `PATH`. A nonstandard executable can be supplied through `CODEX_BIN`:
 
 ```bash
-python -m vllm.entrypoints.openai.api_server \
-    --model Qwen/Qwen3-235B-A22B \
-    --tensor-parallel-size 8 \
-    --port 8001
+export CODEX_BIN=/path/to/codex
 ```
 
-*Note: If you are using a different inference framework or model weights, update the `LOCAL_LLM_URL` and `MODEL_NAME` variables at the top of the script. If the script fails to detect an active LLM, it will gracefully degrade into an "LLM-Disabled" manual review mode.*
-
-## 🚀 Usage
-
-1. Ensure your local LLM service (port 8001) is running and accessible.
-2. Run the script from the terminal, passing your BibTeX file as an argument:
+For Crossref's polite pool, optionally provide an email address:
 
 ```bash
-python check_citation_v0_dev.py demo.bib
+export CROSSREF_EMAIL=you@example.com
 ```
-*(If no argument is provided, the script will default to looking for `main.bib` in the current directory).*
 
-*🔥 **Robustness Tip:** If you press `Ctrl+C` at any point during a long execution, the script will catch the interrupt signal and **instantly save your current progress into the HTML report**. No search data will be lost.*
+If Codex is unavailable, deterministic retrieval and comparison still run, but ambiguous entries are not promoted to `Verified`.
 
-## 📄 Output Report
+## Usage
 
-Upon completion, a `citation_audit_report.html` file will be generated in your directory. Open it in a web browser to view the results categorized into three sections:
+Run the checker directly:
 
-* ✅ **Verified (No action needed)**: Authentic papers absolutely confirmed by the Crossref API.
-* ⚠️ **Double Check (Manual review advised)**: Papers found via deep search on arXiv or official Web domains, which the LLM determined to be a semantic match. The report provides the source URL, the LLM's reasoning, and the original raw BibTeX code for quick copy-pasting and correction.
-* ❌ **Missing (High hallucination risk)**: Papers that could not be found anywhere. Pay special attention to these, as they are likely severe typos or generated by AI.
+```bash
+python check_citation_v0_dev.py references.bib
+```
 
-## ⚠️ Disclaimer
+If no path is provided, it reads `main.bib` from the current directory.
 
-**This tool is a semi-automated assistant and is NOT a substitute for rigorous academic review.**
-1. **Dependency Limits:** The automated confirmation (`Verified` status) relies entirely on the metadata accuracy and network availability of third-party databases (Crossref/arXiv).
-2. **Human Verification Required:** All matches determined by the LLM (`Double Check`) represent only semantic similarity. **You must personally click the provided URLs to verify the specific volume, year, and venue of the publication.**
-3. **Search Fluctuations:** The web search component (DDGS) may occasionally be subject to IP rate-limiting or network instability.
+For a hash-guarded run that proves the input file was unchanged:
+
+```bash
+./run_upstream_codex_audit.sh references.bib audit_results
+```
+
+Use `PYTHON=/path/to/python` to select a specific interpreter.
+
+## Reports
+
+Every run creates:
+
+- `citation_audit_report.html`: interactive evidence report;
+- `citation_audit_report.md`: review-friendly Markdown report;
+- `strict_results.json`: complete structured results for downstream processing.
+
+Each record includes the original BibTeX, decision reason, retrieved sources, URLs, normalized metadata, per-field checks, and cross-source warnings.
+
+## Tests
+
+```bash
+python -m unittest -v test_strict_matching.py
+```
+
+The regression suite covers LaTeX normalization, compound surnames, initials, complete author order, `and others`, venue aliases, arXiv-to-final publication changes, conflicting sources, and the requirement that all fields be supported by one coherent record.
+
+## Limitations
+
+- Third-party metadata can contain errors; the official paper and publisher record remain authoritative.
+- Preprints may legitimately differ from their final versions. `Double Check` records therefore require a version choice, not automatic replacement.
+- Network failures and rate limits can reduce retrieval coverage.
+- No automated result should replace final author review before submission.
